@@ -1,13 +1,112 @@
 # Section 4: Практика: База данных MongoDB
 
+## 46. Удаление из корзины
+
+## 45. Отображение корзины
+
+```js
+// /routes/cart.js
+router.get('/', async (req, res) => {
+  const user = await req.user.populate('cart.items.courseId').execPopulate();
+  const courses = mapCartItems(user.cart.items); // <---======
+  res.render('cart.hbs', {
+    title: 'Cart',
+    isCart: true,
+    courses,
+    price: sumPrice(courses), // <---======
+  });
+});
+
+function mapCartItems(cart) {
+  return cart.map(item => ({
+    ...item.courseId._doc, // _doc удалит лишние метаданные
+    count: item.count,
+  }));
+}
+/*
+  ================================= mapCartItems из этого объекта 
+  {
+    count: 2,
+    _id: 605ce6b829133a14885a3d4e,
+    courseId: {
+      _id: 605c2dacbdb99a0128551405,
+      title: 'React',
+      price: 10000,
+      image: 'https://logos.png',
+      userId: 605c298993a6da28205e86cd,
+      __v: 0
+  }
+  ================================= mapCartItems делает этот 
+  {
+    _id: 605c2dacbdb99a0128551405,
+    title: 'React',
+    price: 10000,
+    image: 'https://logos.png',
+    userId: 605c298993a6da28205e86cd,
+    __v: 0,
+    count: 2
+  }
+*/
+
+function sumPrice(courses) {
+  return courses.reduce(
+    (total, course) => (total += course.price * course.count),
+    0,
+  );
+}
+```
+
 ## 44. Добавление товара в корзину
 
 ```js
-// //schemas/schUser.js
+// //schemas/schUser.js (добавляю .methods.addToCart)
+const { Schema, model } = require('mongoose');
+
+const userSchema = new Schema({
+  email: { ... },
+  name: { ... },
+  cart: {
+    items: [
+      {
+        count: { type: Number ... },
+        courseId: { type: Schema.Types.ObjectId, ref: 'Course' ... },
+      },
+    ],
+  },
+});
+
+userSchema.methods.addToCart = function (course) { // тут нужен контекст поэтому function
+  const items = [...this.cart.items]; // чтоб получить копию а не ссылку
+  const idx = items.findIndex(item => {
+    return item.courseId.toString() === course._id.toString();
+  });
+
+  if (idx >= 0) {
+    items[idx].count = items[idx].count + 1;
+  } else {
+    items.push({
+      courseId: course._id,
+      count: 1,
+    });
+  }
+
+  this.cart = { items };
+  return this.save();
+};
+
+module.exports = model('User', userSchema);
 ```
 
 ```js
 // /routes/cart.js
+const Course = require('../models/schemas/schCourse');
+
+router.post('/add', async (req, res) => {
+  const course = await Course.findById(req.body.id);
+  // помню что req.user доступен благодаря middleware написаному в index.js
+  await req.user.addToCart(course); // .addToCart описан в схеме schUser.js
+  res.redirect('/cart');
+});
 ```
 
 ## 43. Добавление пользователя

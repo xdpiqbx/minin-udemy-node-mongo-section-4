@@ -15,14 +15,28 @@ router.delete('/remove/:id', async (req, res) => {
 });
 
 router.get('/', async (req, res) => {
-  // const cart = await Cart.fetch();
-  // res.render('cart', {
-  //   title: 'Cart',
-  //   isCart: true,
-  //   courses: cart.courses,
-  //   price: cart.price,
-  // });
-  res.json({ test: true });
+  const user = await req.user.populate('cart.items.courseId').execPopulate();
+  const courses = mapCartItems(user.cart.items);
+  res.render('cart.hbs', {
+    title: 'Cart',
+    isCart: true,
+    courses,
+    price: sumPrice(courses),
+  });
 });
+
+function mapCartItems(cart) {
+  return cart.map(item => ({
+    ...item.courseId._doc,
+    count: item.count,
+  }));
+}
+
+function sumPrice(courses) {
+  return courses.reduce(
+    (total, course) => (total += course.price * course.count),
+    0,
+  );
+}
 
 module.exports = router;
