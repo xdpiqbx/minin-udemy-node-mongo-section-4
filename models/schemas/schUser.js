@@ -46,4 +46,27 @@ userSchema.methods.addToCart = function (course) {
   return this.save();
 };
 
+userSchema.methods.removeFromCartById = function (id) {
+  let items = [...this.cart.items]; // чтоб получить копию а не ссылку
+  const idx = items.findIndex(
+    ({ courseId }) => courseId.toString() === id.toString(),
+  );
+
+  if (items[idx].count === 1) {
+    items = items.filter(
+      ({ courseId }) => courseId.toString() !== id.toString(),
+    );
+  } else {
+    items[idx].count -= 1;
+  }
+
+  this.cart = { items };
+  return this.save();
+};
+
+userSchema.methods.clearCart = function () {
+  this.cart = { items: [] };
+  return this.save();
+};
+
 module.exports = model('User', userSchema);

@@ -1,6 +1,269 @@
 # Section 4: Практика: База данных MongoDB
 
+## 50. Вывод заказов
+
+```hbs
+<!-- /views/order.hbs -->
+<h1>Orders</h1>
+{{#if orders.length}}
+  {{#each orders}}
+    Order <small>{{_id}}</small>
+    <p class="date">Date: {{date}}</p>
+    <p><em>{{user.userId.name}}</em> ({{user.userId.email}})</p>
+      {{#each courses}}
+        {{course.title}} x <strong>{{count}}</strong>
+      {{/each}}
+    <p>Total price: <span class="price">{{price}}</span> </p>
+  {{/each}}
+{{else}}
+  <p>There is no orders</p>
+{{/if}}
+```
+
+```js
+// /public/app.js // настройка нормального отображения даты
+const toDate = date => {
+  return new Intl.DateTimeFormat('en-En', {
+    day: '2-digit',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(date));
+};
+
+document
+  .querySelectorAll('.date')
+  .forEach(node => (node.textContent = toDate(node.textContent)));
+```
+
+## 49. Получение данных заказов
+
+```js
+// /routes/order.js создаю путь
+const { Router } = require('express');
+const Order = require('../models/schemas/schOrder');
+const router = Router();
+
+router.get('/', async (req, res) => {
+  res.status(200);
+  res.render('order.hbs', {
+    title: 'Orders',
+    isOrder: true,
+  });
+});
+
+router.post('/', async (req, res) => {
+  try {
+    const user = await req.user.populate('cart.items.courseId').execPopulate();
+
+    const courses = user.cart.items.map(item => ({
+      count: item.count,
+      course: { ...item.courseId._doc },
+    }));
+
+    const order = new Order({
+      courses,
+      user: {
+        name: req.user.name,
+        userId: req.user,
+      },
+    });
+
+    await order.save();
+    await req.user.clearCart();
+
+    res.redirect('/order'); // этот редирект это get запрос
+  } catch (e) {
+    console.log(e);
+  }
+});
+
+module.exports = router;
+```
+
+```js
+// /routes/order.js нормально описываю get запрос
+router.get('/', async (req, res) => {
+  try {
+    const userOrders = await Order.find({
+      'user.userId': req.user._id,
+    }).populate('user.userId');
+
+    const orders = userOrders.map(order => {
+      return {
+        ...order._doc,
+        price: order.courses.reduce((total, { count, course }) => {
+          return (total += count * course.price);
+        }, 0),
+      };
+    });
+
+    await res.status(200);
+    res.render('order.hbs', {
+      title: 'Orders',
+      isOrder: true,
+      orders,
+    });
+  } catch (e) {
+    console.log(e);
+  }
+});
+```
+
+## 48. Подготовка страницы заказов
+
+```hbs
+<!-- /views/cart.hbs после суммы заказа добавляю форму с кнопкой заказа -->
+  <p><strong>Price:</strong><span class="price">{{price}}</span></p>
+  <form action="/order" method="post">
+    <button type="submit" class="btn">Create order</button>
+  </form>
+```
+
+```hbs
+<!-- /views/partials/navbar.hbs добавляю ссылку в навигацию -->
+{{#if isOrder}}
+  <li class="active"><a href="/order">Cart</a></li>
+{{else}}
+  <li><a href="/order">Cart</a></li>
+{{/if}}
+```
+
+```js
+// /models/schemas/schOrder.js описываю схему заказа (кто что и когда заказал)
+const { Schema, model } = require('mongoose');
+
+const orderSchema = new Schema({
+  courses: [
+    {
+      course: {
+        type: Object,
+        required: true,
+      },
+      count: {
+        type: Number,
+        required: true,
+      },
+    },
+  ],
+  user: {
+    name: String,
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+  },
+  date: {
+    type: Date,
+    default: Date.now,
+  },
+});
+
+module.exports = model('Order', orderSchema);
+```
+
+```js
+// /routes/order.js создаю путь
+const { Router } = require('express');
+const Order = require('../models/schemas/schOrder');
+const router = Router();
+
+router.get('/', async (req, res) => {
+  res.status(200);
+  res.render('order.hbs', {
+    title: 'Orders',
+    isOrder: true,
+  });
+});
+
+router.post('/', async (req, res) => {
+  res.redirect('/order');
+});
+
+module.exports = router;
+```
+
+```hbs
+<!-- /views/order.hbs описываю views -->
+```
+
+```js
+// index.js добавляю путь
+const orderRoutes = require('./routes/order');
+app.use('/order', orderRoutes);
+```
+
+Осталось создать логику контроллера и описать шаблон
+
+---
+
+## 47. Трансформация данных на клиенте
+
+```js
+// /schemas/schCourse.js
+const { Schema, model } = require('mongoose');
+
+const courseSchema = new Schema({ .... });
+// ---------------------------------------------------
+courseSchema.method('toClient', function () {
+  const course = this.toObject();
+  course.id = course._id; // просто перезаписываю _id в id
+  delete course._id; // удаляю _id
+  return course;
+});
+// ---------------------------------------------------
+module.exports = model('Course', courseSchema);
+```
+
+```js
+// /routes/cart.js
+function mapCartItems(cart) {
+  return cart.map(item => ({
+    ...item.courseId._doc,
+    id: item.courseId.id, // вытягиваю id который перезаписал выше
+    count: item.count,
+  }));
+}
+```
+
 ## 46. Удаление из корзины
+
+```js
+// /routes/cart.js
+router.delete('/remove/:id', async (req, res) => {
+  await req.user.removeFromCartById(req.params.id); // это будет описано тут /schemas/schUser.js
+
+  // и после удалеия просто парсим то что в корзине
+  const user = await req.user.populate('cart.items.courseId').execPopulate();
+  const courses = mapCartItems(user.cart.items);
+  const cart = { courses, price: sumPrice(courses) };
+  res.status(200).json(cart);
+});
+```
+
+```js
+// /schemas/schUser.js (.removeFromCartById)
+userSchema.methods.removeFromCartById = function (id) {
+  let items = [...this.cart.items]; // чтоб получить копию а не ссылку
+  const idx = items.findIndex(
+    ({ courseId }) => courseId.toString() === id.toString(),
+  );
+
+  if (items[idx].count === 1) {
+    items = items.filter(
+      ({ courseId }) => courseId.toString() !== id.toString(),
+    );
+  } else {
+    items[idx].count -= 1;
+  }
+
+  this.cart = { items };
+  return this.save();
+};
+```
 
 ## 45. Отображение корзины
 
